@@ -1,0 +1,635 @@
+openapi: 3.0.0
+info:
+  title: AI Textbook Platform API
+  version: 1.0.0
+  description: API for the interactive AI Textbook Platform, supporting content delivery, user management, assessments, and RAG chatbot functionality.
+
+servers:
+  - url: https://api.aitextbook.com
+    description: Production server
+  - url: http://localhost:8000
+    description: Development server
+
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  type: string
+                  example: student_user
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  format: password
+                  example: secure_password
+                personalization_survey:
+                  type: object
+                  description: Initial survey data for personalization
+      responses:
+        '201':
+          description: User registered successfully
+        '400':
+          description: Invalid input
+
+  /auth/login:
+    post:
+      summary: Log in a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  format: password
+                  example: secure_password
+      responses:
+        '200':
+          description: User logged in successfully
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session_id=abcde12345; Path=/; HttpOnly
+        '401':
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      summary: Log out a user
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: User logged out successfully
+
+  /users/me/profile:
+    get:
+      summary: Get current user's profile
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: User profile data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+    put:
+      summary: Update current user's profile
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Profile updated successfully
+        '400':
+          description: Invalid input
+        '401':
+          description: Unauthorized
+
+  /users/me/preferences:
+    put:
+      summary: Update current user's personalization preferences
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON object for personalization preferences
+      responses:
+        '200':
+          description: Preferences updated successfully
+        '400':
+          description: Invalid input
+        '401':
+          description: Unauthorized
+
+  /courses:
+    get:
+      summary: Get a list of all courses
+      responses:
+        '200':
+          description: A list of courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Course'
+    post:
+      summary: Create a new course (Instructor only)
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - description
+                - duration_weeks
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                duration_weeks:
+                  type: integer
+                  minimum: 1
+      responses:
+        '201':
+          description: Course created successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+
+  /courses/{course_id}:
+    parameters:
+      - in: path
+        name: course_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+        description: ID of the course
+    get:
+      summary: Get details of a specific course
+      responses:
+        '200':
+          description: Course details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Course'
+        '404':
+          description: Course not found
+    put:
+      summary: Update a course (Instructor only)
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                duration_weeks:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Course updated successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+        '404':
+          description: Course not found
+    delete:
+      summary: Delete a course (Instructor only)
+      security:
+        - CookieAuth: []
+      responses:
+        '204':
+          description: Course deleted successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+        '404':
+          description: Course not found
+
+  /courses/{course_id}/chapters:
+    parameters:
+      - in: path
+        name: course_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+        description: ID of the course
+    get:
+      summary: Get chapters for a specific course
+      responses:
+        '200':
+          description: A list of chapters for the course
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Chapter'
+    post:
+      summary: Create a new chapter for a course (Instructor only)
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - content
+                - order
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+                  description: Chapter content in MDX format
+                order:
+                  type: integer
+      responses:
+        '201':
+          description: Chapter created successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+        '404':
+          description: Course not found
+
+  /chapters/{chapter_id}:
+    parameters:
+      - in: path
+        name: chapter_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+        description: ID of the chapter
+    get:
+      summary: Get details of a specific chapter
+      responses:
+        '200':
+          description: Chapter details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chapter'
+        '404':
+          description: Chapter not found
+    put:
+      summary: Update a chapter (Instructor only)
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+                  description: Chapter content in MDX format
+                order:
+                  type: integer
+      responses:
+        '200':
+          description: Chapter updated successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+        '404':
+          description: Chapter not found
+    delete:
+      summary: Delete a chapter (Instructor only)
+      security:
+        - CookieAuth: []
+      responses:
+        '204':
+          description: Chapter deleted successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+        '404':
+          description: Chapter not found
+
+  /assessments/{assessment_id}:
+    parameters:
+      - in: path
+        name: assessment_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+        description: ID of the assessment
+    get:
+      summary: Get details of a specific assessment
+      responses:
+        '200':
+          description: Assessment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assessment'
+        '404':
+          description: Assessment not found
+
+  /assessments/{assessment_id}/submissions:
+    parameters:
+      - in: path
+        name: assessment_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+        description: ID of the assessment
+    post:
+      summary: Submit an assessment
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - submission_data
+              properties:
+                submission_data:
+                  type: object
+                  description: User's answers or submitted files/links
+      responses:
+        '201':
+          description: Submission recorded successfully
+        '401':
+          description: Unauthorized
+        '404':
+          description: Assessment not found
+
+  /users/{user_id}/submissions:
+    parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+        description: ID of the user
+    get:
+      summary: Get all submissions for a user
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: A list of user's submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Submission'
+        '401':
+          description: Unauthorized
+        '404':
+          description: User not found
+
+  /chatbot/query:
+    post:
+      summary: Send a query to the RAG chatbot
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  example: What is ROS 2?
+      responses:
+        '200':
+          description: Chatbot response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                    example: ROS 2 (Robot Operating System 2) is a set of software libraries and tools that help you build robot applications.
+        '401':
+          description: Unauthorized
+
+  /admin/translations:
+    get:
+      summary: Get all translations for a given language (Instructor only)
+      security:
+        - CookieAuth: []
+      parameters:
+        - in: query
+          name: language
+          schema:
+            type: string
+          required: true
+          description: Target language code (e.g., 'ur')
+      responses:
+        '200':
+          description: A list of translations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Translation'
+    post:
+      summary: Add a new translation (Instructor only)
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - original_text_hash
+                - language
+                - translated_text
+              properties:
+                original_text_hash:
+                  type: string
+                language:
+                  type: string
+                translated_text:
+                  type: string
+      responses:
+        '201':
+          description: Translation added successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not an instructor)
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: session_id
+      description: Session cookie for authentication
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        profile_data:
+          type: object
+          description: JSON object for personalization preferences
+        language_preference:
+          type: string
+          example: en
+
+    Course:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        duration_weeks:
+          type: integer
+          minimum: 1
+
+    Chapter:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        course_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+          description: Chapter content in MDX format
+        order:
+          type: integer
+
+    Assessment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        chapter_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [MCQ, Capstone]
+        title:
+          type: string
+        data:
+          type: object
+          description: JSON object for questions/rubric
+
+    Submission:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        assessment_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        submission_data:
+          type: object
+          description: JSON object for user's answers or files/links
+        score:
+          type: number
+          format: float
+          nullable: true
+        feedback:
+          type: string
+          nullable: true
+
+    Translation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        original_text_hash:
+          type: string
+        language:
+          type: string
+        translated_text:
+          type: string

@@ -1,0 +1,23 @@
+# Netlify configuration for deploying the Docusaurus frontend
+# Backend (FastAPI) must be deployed separately on Railway/Render/Fly.io
+
+[build]
+  command = "cd physical-ai-book && npm install && npm run build"
+  publish = "physical-ai-book/build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Redirect API calls to your deployed backend (update the URL)
+[[redirects]]
+  from = "/api/*"
+  to = "https://your-backend-url.railway.app/:splat"
+  status = 200
+  force = true
+
+# SPA fallback for client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
