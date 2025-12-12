@@ -1,18 +1,17 @@
 [build]
+  base = "physical-ai-book"           # ← Ye line add kar do
   command = "npm ci && npm run build"
-  publish = "build"
+  publish = "physical-ai-book/build"
 
 [build.environment]
   NODE_VERSION = "20"
 
-# Backend API proxy (apna backend URL daal dena)
 [[redirects]]
   from = "/api/*"
   to = "https://your-backend-url.railway.app/:splat"
   status = 200
   force = true
 
-# Docusaurus ke liye SPA routing (ye bahut zaroori hai)
 [[redirects]]
   from = "/*"
   to = "/index.html"
