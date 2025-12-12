@@ -1,5 +1,6 @@
 {
-  "name": "physical-ai-book",
+  "name": "physical-ai-humanoids-robotics",
+  "homepage": "https://physical-ai-humanoids-robotics.netlify.app/physical-ai-book",
   "version": "0.0.0",
   "private": true,
   "scripts": {
