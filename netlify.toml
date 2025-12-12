@@ -1,19 +1,17 @@
 [build]
-  base = "physical-ai-book"                    # andar ke folder mein jaao
-  command = "npm ci && npm run build"          # yahin build karo
-  publish = "build"                            # sirf "build" folder publish karo (ek hi baar)
+  base = "physical-ai-book"
+  command = "npm ci && npm run build"
+  publish = "build"
 
 [build.environment]
   NODE_VERSION = "20"
 
-# API calls backend par bhejo
 [[redirects]]
   from = "/api/*"
   to = "https://your-backend-url.railway.app/:splat"
   status = 200
   force = true
 
-# Docusaurus ke liye SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
