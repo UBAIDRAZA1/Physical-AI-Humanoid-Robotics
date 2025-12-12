@@ -5,14 +5,14 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# API proxy to your backend
+# Backend API proxy (apna backend URL daal dena)
 [[redirects]]
   from = "/api/*"
   to = "https://your-backend-url.railway.app/:splat"
   status = 200
   force = true
 
-# SPA fallback
+# Docusaurus ke liye SPA routing (ye bahut zaroori hai)
 [[redirects]]
   from = "/*"
   to = "/index.html"
