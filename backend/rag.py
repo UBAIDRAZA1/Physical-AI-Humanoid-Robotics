@@ -1,163 +1,230 @@
 import os
 import uuid
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 from dotenv import load_dotenv
 import google.generativeai as genai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
-
 load_dotenv()
 
-
 class RAGPipeline:
-  """
-  Minimal RAG helper around Qdrant Cloud + Gemini (Google Generative AI).
-  """
+    def __init__(self) -> None:
+        # Qdrant setup
+        qdrant_url = os.getenv("QDRANT_URL")
+        qdrant_api_key = os.getenv("QDRANT_API_KEY")
+        self.collection_name = os.getenv("QDRANT_COLLECTION", "hackathon-book")
 
-  def __init__(self) -> None:
-    qdrant_url = os.getenv("QDRANT_URL")
-    qdrant_api_key = os.getenv("QDRANT_API_KEY")
-    self.collection_name = os.getenv("QDRANT_COLLECTION", "physical-ai-book")
-
-    if not qdrant_url or not qdrant_api_key:
-      self.qdrant: Optional[QdrantClient] = None
-    else:
-      self.qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
-
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-      raise RuntimeError("GEMINI_API_KEY is required")
-
-    genai.configure(api_key=gemini_api_key)
-
-    chat_model = os.getenv("GEMINI_MODEL", "gemini-pro")
-    if chat_model.startswith("models/"):
-      chat_model = chat_model.replace("models/", "", 1)
-    self.chat_model_name = chat_model
-
-    embedding_model = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
-    if not embedding_model.startswith("models/"):
-      embedding_model = f"models/{embedding_model}"
-    self.embedding_model_name = embedding_model
-    self.chat_model = genai.GenerativeModel(self.chat_model_name)
-
-  def ensure_collection(self, vector_size: int = 768) -> None:
-    if self.qdrant is None:
-      return
-
-    collections = self.qdrant.get_collections().collections
-    existing = {c.name for c in collections}
-    if self.collection_name in existing:
-      return
-
-    self.qdrant.create_collection(
-      collection_name=self.collection_name,
-      vectors_config=qmodels.VectorParams(size=vector_size, distance=qmodels.Distance.COSINE),
-    )
-
-  def embed(self, text: str) -> list[float]:
-    result = genai.embed_content(
-      model=self.embedding_model_name,
-      content=text,
-      task_type="retrieval_document",
-    )
-    return result["embedding"]  # type: ignore[no-any-return]
-
-  def upsert_documents(self, chunks: list[str]) -> None:
-    if self.qdrant is None:
-      raise RuntimeError("Qdrant client not configured")
-
-    vectors = [self.embed(c) for c in chunks]
-    points = [
-      qmodels.PointStruct(id=str(uuid.uuid4()), vector=v, payload={"text": c})
-      for v, c in zip(vectors, chunks)
-    ]
-    self.qdrant.upsert(collection_name=self.collection_name, points=points)
-
-  def retrieve(self, query: str, limit: int = 4) -> list[str]:
-    if self.qdrant is None:
-      return []
-
-    try:
-      query_vector = self.embed(query)
-      results = self.qdrant.search(
-        collection_name=self.collection_name,
-        query_vector=query_vector,
-        limit=limit,
-      )
-      return [hit.payload.get("text", "") for hit in results if hit.payload]
-    except Exception as e:  # pragma: no cover - diagnostic path
-      print(f"Warning: Retrieval failed: {e}")
-      return []
-
-  async def answer_question(
-    self,
-    question: str,
-    selected_text: Optional[str] = None,
-    conversation_id: Optional[str] = None,
-  ) -> Tuple[str, str]:
-    if not conversation_id:
-      conversation_id = str(uuid.uuid4())
-
-    if selected_text and selected_text.strip():
-      context_blocks = [selected_text.strip()]
-    else:
-      context_blocks = self.retrieve(question)
-
-    context = "\n\n---\n\n".join(context_blocks) if context_blocks else "No additional context available."
-
-    system_prompt = (
-      "You are an AI assistant helping the reader of an online technical book. "
-      "Answer questions strictly based on the provided context. "
-      "If the answer is not in the context, say that you cannot find it in the book."
-    )
-
-    prompt = f"{system_prompt}\n\nBook context:\n{context}\n\nQuestion: {question}"
-
-    try:
-      response = self.chat_model.generate_content(prompt)
-      if hasattr(response, "text") and response.text:
-        answer = response.text
-      elif hasattr(response, "candidates") and response.candidates:
-        candidate = response.candidates[0]
-        if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
-          answer = candidate.content.parts[0].text if candidate.content.parts else ""
+        if not qdrant_url or not qdrant_api_key:
+            print("Warning: Qdrant not configured")
+            self.qdrant: Optional[QdrantClient] = None
         else:
-          answer = str(candidate)
-      else:
-        answer = str(response) if response else "No response generated."
+            self.qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+            print(f"Connected to Qdrant: {qdrant_url}")
 
-      if not answer or not answer.strip():
-        answer = "I received an empty response from the AI model. Please try again."
+        # Gemini setup
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY missing!")
 
-    except Exception as e:  # pragma: no cover - diagnostic path
-      error_msg = str(e)
-      print(f"Error generating response: {error_msg}")
-      print(f"Error type: {type(e).__name__}")
+        genai.configure(api_key=gemini_api_key)
 
-      if "404" in error_msg or "not found" in error_msg.lower():
-        answer = (
-          f"Model configuration error: The AI model '{self.chat_model_name}' was not found. "
-          "Please check your GEMINI_MODEL setting in .env file. "
-          "Valid models include: gemini-1.5-flash, gemini-1.5-pro, gemini-pro"
+        # Get available models and find a working one
+        env_model = os.getenv("GEMINI_MODEL")
+        preferred_models = []
+        if env_model:
+            # Remove 'models/' prefix if present
+            clean_env_model = env_model.replace('models/', '')
+            preferred_models.append(clean_env_model)
+        
+        # Add fallback models
+        preferred_models.extend(["gemini-pro", "gemini-1.5-flash", "gemini-1.5-pro"])
+        
+        # Try to find an available model
+        self.chat_model_name = None
+        try:
+            models = genai.list_models()
+            available_model_names = []
+            for model in models:
+                if 'generateContent' in model.supported_generation_methods:
+                    model_name = model.name.replace('models/', '') if model.name.startswith('models/') else model.name
+                    available_model_names.append(model_name)
+            
+            # Find first preferred model that's available
+            for preferred in preferred_models:
+                if preferred in available_model_names:
+                    self.chat_model_name = preferred
+                    break
+            
+            # If no preferred model found, use first available
+            if not self.chat_model_name and available_model_names:
+                self.chat_model_name = available_model_names[0]
+                print(f"Warning: Using first available model: {self.chat_model_name}")
+        except Exception as e:
+            print(f"Warning: Could not list models, using default: {e}")
+            # Fallback to default if listing fails
+            self.chat_model_name = preferred_models[0] if preferred_models else "gemini-pro"
+        
+        if not self.chat_model_name:
+            raise RuntimeError("No available Gemini models found!")
+        
+        self.embedding_model_name = os.getenv('GEMINI_EMBEDDING_MODEL', 'text-embedding-004')
+        # Remove 'models/' prefix if present
+        if self.embedding_model_name.startswith('models/'):
+            self.embedding_model_name = self.embedding_model_name.replace('models/', '')
+
+        self.chat_model = genai.GenerativeModel(
+            self.chat_model_name,
+            generation_config={
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 2048,  # Increased for better responses
+            },
+            safety_settings=[
+                {"category": genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH},
+                {"category": genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH},
+                {"category": genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH},
+                {"category": genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH},
+            ]
         )
-      elif "401" in error_msg or "unauthorized" in error_msg.lower() or "api key" in error_msg.lower():
-        answer = (
-          "Authentication error: Invalid or missing GEMINI_API_KEY. "
-          "Please check your .env file and ensure the API key is correct."
-        )
-      elif "timeout" in error_msg.lower() or "network" in error_msg.lower():
-        answer = (
-          "Network timeout: Could not connect to the AI service. "
-          "Please check your internet connection and try again."
-        )
-      else:
-        answer = (
-          f"I encountered an error: {error_msg[:200]}. "
-          "Please check your API configuration and try again."
-        )
+        print(f"Gemini model ready: {self.chat_model_name}")
 
-    return answer, conversation_id
+    def embed(self, text: str) -> List[float]:
+        result = genai.embed_content(
+            model=self.embedding_model_name,
+            content=text,
+            task_type="retrieval_query",
+        )
+        return result["embedding"]
 
+    def retrieve(self, query: str, limit: int = 10) -> List[str]:
+        if not self.qdrant:
+            print("Warning: Qdrant not configured, cannot retrieve context")
+            return []
+        try:
+            import time
+            start_time = time.time()
+            query_vector = self.embed(query)
+            embed_time = time.time() - start_time
+            print(f"Embedding generated in {embed_time:.2f} seconds")
+            
+            print(f"Searching in collection: {self.collection_name}")
+            search_start = time.time()
+            results = self.qdrant.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=limit,
+                with_payload=True,
+            )
+            search_time = time.time() - search_start
+            print(f"Qdrant search completed in {search_time:.2f} seconds")
+            
+            retrieved_texts = [hit.payload.get("text", "") for hit in results if hit.payload and hit.payload.get("text")]
+            print(f"Retrieved {len(retrieved_texts)} results from Qdrant")
+            if not retrieved_texts:
+                print(f"Warning: No results found for query: {query[:50]}...")
+            return retrieved_texts
+        except Exception as e:
+            print(f"Retrieval error: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    async def answer_question(
+        self,
+        question: str,
+        selected_text: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        use_selection_only: bool = False,
+    ) -> Tuple[str, str]:
+        conversation_id = conversation_id or str(uuid.uuid4())
+
+        # If use_selection_only is True, only use selected_text (don't search Qdrant)
+        if use_selection_only:
+            if selected_text and selected_text.strip():
+                context = selected_text.strip()
+                context_source = "selected_text_only"
+                print(f"Using only selected text (length: {len(context)})")
+            else:
+                # This should not happen if frontend validation works, but handle it
+                context = None
+                context_source = "none"
+                print("Warning: use_selection_only=True but no selected_text provided")
+        elif selected_text and selected_text.strip():
+            # Use selected text as additional context along with Qdrant results
+            selected_context = selected_text.strip()
+            retrieved = self.retrieve(question)
+            if retrieved:
+                context = f"Selected text:\n{selected_context}\n\n---\n\nBook content:\n" + "\n\n---\n\n".join(retrieved)
+                context_source = "selected_text_and_qdrant"
+                print(f"Using selected text + {len(retrieved)} chunks from Qdrant")
+            else:
+                context = selected_context
+                context_source = "selected_text_fallback"
+                print("Using selected text (no Qdrant results)")
+        else:
+            # No selected text, use Qdrant only
+            retrieved = self.retrieve(question)
+            if retrieved:
+                context = "\n\n---\n\n".join(retrieved)
+                context_source = "qdrant"
+                print(f"Retrieved {len(retrieved)} chunks from Qdrant")
+            else:
+                context = None
+                context_source = "none"
+                print("Warning: No context retrieved from Qdrant")
+
+        # Build prompt based on whether context is available
+        # Limit context length to avoid token limits and speed up processing
+        max_context_length = 8000  # Limit context to ~8000 chars
+        if context and len(context) > max_context_length:
+            context = context[:max_context_length] + "\n\n[Context truncated...]"
+            print(f"Context truncated to {max_context_length} characters")
+        
+        if context:
+            prompt = f"""You are a helpful assistant for the Physical AI & Humanoid Robotics textbook.
+
+Answer the question using the provided context. Use clear, professional English. Be concise.
+
+Context:
+{context}
+
+Question: {question}
+
+Provide a clear, concise answer based on the context."""
+        else:
+            # If no context, still try to answer but note the limitation
+            prompt = f"""You are a helpful assistant for the Physical AI & Humanoid Robotics textbook.
+
+Question: {question}
+
+Note: No specific context was retrieved from the book for this question. Please provide a helpful answer based on general knowledge about Physical AI and Humanoid Robotics, but mention that specific book content was not available.
+
+Answer in clear, professional English."""
+
+        try:
+            import time
+            start_time = time.time()
+            print(f"Calling Gemini API with model: {self.chat_model_name}")
+            print(f"Prompt length: {len(prompt)} characters")
+            
+            # Use generate_content (timeout handled by client library)
+            response = self.chat_model.generate_content(prompt)
+            
+            elapsed_time = time.time() - start_time
+            print(f"Gemini API response received in {elapsed_time:.2f} seconds")
+            
+            if response and hasattr(response, 'text') and response.text:
+                answer = response.text.strip()
+            else:
+                print("Warning: Empty or invalid response from Gemini")
+                answer = "I apologize, but I couldn't generate a response. Please try again."
+        except Exception as e:
+            print(f"Gemini error: {e}")
+            import traceback
+            traceback.print_exc()
+            answer = f"I encountered an error while processing your question: {str(e)}. Please try again later."
+
+        return answer, conversation_id

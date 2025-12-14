@@ -1,6 +1,5 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
-
 import styles from './Chatbot.module.css';
 
 type ChatMessage = {
@@ -19,9 +18,12 @@ function getSelectionText(): string {
   return selection ? selection.toString() : '';
 }
 
-const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
-  const {siteConfig} = useDocusaurusContext();
-  const defaultApiBase = (siteConfig.customFields?.apiBaseUrl as string) || 'http://localhost:8000';
+const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
+  const { siteConfig } = useDocusaurusContext();
+
+  // Python backend URL use karo
+  const backendBaseUrl = apiBaseUrl || (siteConfig.customFields?.apiBaseUrl as string) || 'http://localhost:8000';
+  const baseUrl = `${backendBaseUrl}/chat`;
 
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -29,7 +31,6 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedText, setSelectedText] = useState('');
   const [useSelectionOnly, setUseSelectionOnly] = useState(false);
-  const baseUrl = apiBaseUrl || defaultApiBase;
 
   const refreshSelection = useCallback(() => {
     setSelectedText(getSelectionText());
@@ -37,9 +38,7 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handler = () => {
-      refreshSelection();
-    };
+    const handler = () => refreshSelection();
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
   }, [refreshSelection]);
@@ -49,8 +48,31 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
     if (!trimmed) return;
 
     const currentSelection = getSelectionText();
-    const selectionToSend =
-      useSelectionOnly && currentSelection.trim().length > 0 ? currentSelection : undefined;
+    
+    // If checkbox is checked, require selected text
+    if (useSelectionOnly && !currentSelection.trim()) {
+      const errorMsg: ChatMessage = {
+        id: `${Date.now()}-error`,
+        role: 'assistant',
+        content: 'Please select some text first when using "Answer only from selected text" mode.',
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      return;
+    }
+    
+    // If checkbox is checked, use selected text only
+    // If checkbox is not checked, send selected text as additional context if available
+    const selectionToSend = useSelectionOnly 
+      ? currentSelection.trim()  // Always send when checkbox is checked (we validated it's not empty above)
+      : (currentSelection.trim() || undefined);  // Send undefined if checkbox not checked and no selection
+
+    console.log('Sending question:', {
+      question: trimmed,
+      useSelectionOnly,
+      hasSelection: currentSelection.trim().length > 0,
+      selectionLength: currentSelection.trim().length,
+      selectionToSend: selectionToSend ? `${selectionToSend.substring(0, 50)}...` : 'none',
+    });
 
     const userMsg: ChatMessage = {
       id: `${Date.now()}-user`,
@@ -62,23 +84,56 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
     setIsLoading(true);
 
     try {
-      const res = await fetch(`${baseUrl}/chat`, {
+      // Add timeout to prevent hanging (60 seconds for Gemini API)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+      const requestBody = {
+        question: trimmed,
+        selected_text: selectionToSend || undefined,
+        conversation_id: conversationId,
+        use_selection_only: useSelectionOnly,
+      };
+
+      console.log('API Request:', {
+        url: baseUrl,
+        body: { ...requestBody, selected_text: requestBody.selected_text ? `${requestBody.selected_text.substring(0, 50)}...` : undefined },
+      });
+
+      const res = await fetch(baseUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          question: trimmed,
-          selected_text: selectionToSend,
-          conversation_id: conversationId,
-        }),
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+        let errorText = '';
+        try {
+          const errorData = await res.json();
+          errorText = errorData.detail || errorData.message || errorData.error || `HTTP ${res.status}`;
+        } catch {
+          errorText = await res.text() || `HTTP ${res.status}`;
+        }
+        console.error('API Error:', res.status, errorText);
+        throw new Error(errorText);
       }
 
-      const data: {answer: string; conversation_id: string} = await res.json();
+      const data: { answer: string; conversation_id: string } = await res.json();
+      console.log('API Response:', {
+        hasAnswer: !!data.answer,
+        answerLength: data.answer?.length || 0,
+        conversationId: data.conversation_id,
+      });
+
+      if (!data.answer) {
+        throw new Error('Empty response from server');
+      }
+
       setConversationId(data.conversation_id);
 
       const assistantMsg: ChatMessage = {
@@ -87,12 +142,27 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
         content: data.answer,
       };
       setMessages(prev => [...prev, assistantMsg]);
-    } catch {
+
+    } catch (error: any) {
+      console.error('Chat error:', error);
+      let errorMessage = 'Unable to get response from server.';
+      
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request timed out. The server is taking too long to respond.';
+      } else if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+        errorMessage = 'Cannot connect to backend server. Is the backend running? (http://localhost:8000)';
+      } else if (error.message?.includes('404')) {
+        errorMessage = 'API endpoint not found. Please check the backend.';
+      } else if (error.message?.includes('500')) {
+        errorMessage = 'Server error occurred. Please check backend logs.';
+      } else if (error.message) {
+        errorMessage = `Error: ${error.message}`;
+      }
+      
       const assistantMsg: ChatMessage = {
-        id: `${Date.now()}-assistant-error`,
+        id: `${Date.now()}-error`,
         role: 'assistant',
-        content:
-          'Sorry, something went wrong talking to the backend. Please make sure the FastAPI server is running.',
+        content: errorMessage,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } finally {
@@ -100,7 +170,7 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
     }
   };
 
-  const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = e => {
+  const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void sendQuestion();
@@ -114,8 +184,7 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
       <div className={styles.header}>
         <h2 className={styles.title}>Book Assistant</h2>
         <p className={styles.subtitle}>
-          Ask questions about this book. Optionally select text first to limit the answer to just
-          that selection.
+          Ask questions, select text — get instant answers!
         </p>
       </div>
 
@@ -124,34 +193,32 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
           <input
             type="checkbox"
             checked={useSelectionOnly}
-            onChange={e => setUseSelectionOnly(e.target.checked)}
+            onChange={(e) => setUseSelectionOnly(e.target.checked)}
             disabled={!hasSelection}
           />
-          <span>Answer using only my selected text</span>
+          <span>Answer only from selected text</span>
         </label>
         <button type="button" className={styles.selectionButton} onClick={refreshSelection}>
-          Refresh selection
+          Refresh Selection
         </button>
-        <span className={styles.selectionStatus}>
-          {hasSelection
-            ? 'Selection captured from page.'
-            : 'Select some text in the page to enable selection-only answers.'}
-        </span>
       </div>
 
       <div className={styles.messages}>
         {messages.length === 0 && (
           <div className={styles.emptyState}>
-            Start by asking a question about the book, for example:
+            Get started, for example:
             <br />
-            <code>What is the main idea of this chapter?</code>
+            <code>What is forward kinematics?</code>
           </div>
         )}
-        {messages.map(msg => (
+        {messages.map((msg) => (
           <div
             key={msg.id}
-            className={msg.role === 'user' ? styles.messageUser : styles.messageAssistant}>
-            <div className={styles.messageRole}>{msg.role === 'user' ? 'You' : 'Assistant'}</div>
+            className={msg.role === 'user' ? styles.messageUser : styles.messageAssistant}
+          >
+            <div className={styles.messageRole}>
+              {msg.role === 'user' ? 'You' : 'Assistant'}
+            </div>
             <div className={styles.messageContent}>{msg.content}</div>
           </div>
         ))}
@@ -161,9 +228,9 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
       <div className={styles.inputBar}>
         <textarea
           className={styles.textarea}
-          placeholder="Ask a question about the book…"
+          placeholder="Type your question here…"
           value={question}
-          onChange={e => setQuestion(e.target.value)}
+          onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={3}
         />
@@ -171,7 +238,8 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
           type="button"
           className={styles.sendButton}
           onClick={sendQuestion}
-          disabled={isLoading || question.trim().length === 0}>
+          disabled={isLoading || question.trim().length === 0}
+        >
           {isLoading ? 'Sending…' : 'Ask'}
         </button>
       </div>
@@ -180,4 +248,3 @@ const Chatbot: React.FC<ChatbotProps> = ({apiBaseUrl}) => {
 };
 
 export default Chatbot;
-
