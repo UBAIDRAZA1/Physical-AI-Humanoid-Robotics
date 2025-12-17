@@ -5,7 +5,9 @@ Professional implementation compatible with BetterAuth patterns.
 from typing import Optional
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import RedirectResponse
+from starlette.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -18,10 +20,10 @@ from auth import (
     get_user_from_token,
     generate_user_id,
 )
+from oauth import oauth, is_google_oauth_enabled
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 security = HTTPBearer()
-
 
 # Request/Response Models
 class SignupRequest(BaseModel):
@@ -129,6 +131,75 @@ async def get_current_user_optional(
 
 
 # Routes
+@router.get("/login/google")
+async def login_google(request: Request):
+    """
+    Redirect to Google for authentication.
+    """
+    if not await is_google_oauth_enabled():
+        raise HTTPException(status_code=404, detail="Google OAuth is not configured")
+    
+    redirect_uri = request.url_for('auth_google')
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@router.get("/google", response_model=AuthResponse)
+async def auth_google(request: Request, db: Session = Depends(get_db)):
+    """
+    Google OAuth2 callback endpoint.
+    Handles user creation and login after Google authentication.
+    """
+    if not await is_google_oauth_enabled():
+        raise HTTPException(status_code=404, detail="Google OAuth is not configured")
+
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Google login failed: {e}")
+
+    user_info = token.get('userinfo')
+    if not user_info:
+        raise HTTPException(status_code=400, detail="Could not retrieve user info from Google")
+
+    email = user_info.get('email')
+    if not email:
+        raise HTTPException(status_code=400, detail="No email found in Google account")
+
+    # Check if user already exists
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        # Create new user if they don't exist
+        user_id = generate_user_id()
+        new_user = User(
+            id=user_id,
+            email=email,
+            name=user_info.get('name', 'New User'),
+            image=user_info.get('picture'),
+            email_verified=user_info.get('email_verified', False),
+            password_hash=None,  # No password for OAuth users
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        user = new_user
+    elif not user.image and user_info.get('picture'):
+        # Update image if it's missing
+        user.image = user_info.get('picture')
+        db.commit()
+        db.refresh(user)
+
+    # Create access token
+    access_token = create_access_token(
+        data={"sub": user.id, "email": user.email}
+    )
+    
+    return AuthResponse(
+        access_token=access_token,
+        user=UserResponse.from_orm(user),
+    )
+
+
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     """
@@ -175,18 +246,9 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     
     return AuthResponse(
         access_token=access_token,
-        user=UserResponse(
-            id=new_user.id,
-            email=new_user.email,
-            name=new_user.name,
-            software_background=new_user.software_background,
-            hardware_background=new_user.hardware_background,
-            email_verified=new_user.email_verified,
-            created_at=new_user.created_at.isoformat(),
-            image=new_user.image,
-            role=new_user.role,
-        ),
+        user=UserResponse.from_orm(new_user),
     )
+
 
 
 @router.post("/login", response_model=AuthResponse)

@@ -63,7 +63,7 @@ if SQLALCHEMY_AVAILABLE and Base:
         id = Column(String, primary_key=True, index=True)  # UUID as string
         email = Column(String, unique=True, index=True, nullable=False)
         name = Column(String, nullable=False)
-        password_hash = Column(String, nullable=False)
+        password_hash = Column(String, nullable=True)
         
         # Custom fields for personalization (hackathon requirement)
         software_background = Column(Text, nullable=True)  # User's software experience

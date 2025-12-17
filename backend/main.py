@@ -13,14 +13,14 @@ get_current_user_optional = None
 User = None
 DATABASE_URL = None
 
-# Try to import auth modules only if needed (commented out for now)
-# try:
-#     from auth_routes import router as auth_router, get_current_user_optional
-#     from database import User, init_db, DATABASE_URL
-#     AUTH_AVAILABLE = True
-# except Exception as e:
-#     print(f"Warning: Authentication modules not available: {e}")
-#     AUTH_AVAILABLE = False
+# Try to import auth modules only if needed
+try:
+    from auth_routes import router as auth_router, get_current_user_optional
+    from database import User, init_db, DATABASE_URL
+    AUTH_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Authentication modules not available: {e}")
+    AUTH_AVAILABLE = False
 
 app = FastAPI(title="Physical AI RAG Backend")
 
@@ -34,18 +34,18 @@ app.add_middleware(
 
 rag = RAGPipeline()
 
-# Authentication routes disabled for now (can be enabled later if needed)
-# if AUTH_AVAILABLE and auth_router:
-#     try:
-#         if DATABASE_URL:
-#             app.include_router(auth_router)
-#             print("Authentication routes enabled")
-#         else:
-#             print("Warning: DATABASE_URL not set. Authentication routes disabled.")
-#     except Exception as e:
-#         print(f"Warning: Could not load authentication routes: {e}")
-# else:
-print("Authentication routes disabled. Chat endpoint works without auth.")
+# Authentication routes
+if AUTH_AVAILABLE and auth_router:
+    try:
+        if DATABASE_URL:
+            app.include_router(auth_router)
+            print("Authentication routes enabled")
+        else:
+            print("Warning: DATABASE_URL not set. Authentication routes disabled.")
+    except Exception as e:
+        print(f"Warning: Could not load authentication routes: {e}")
+else:
+    print("Authentication routes disabled. Chat endpoint works without auth.")
 
 
 class ChatRequest(BaseModel):

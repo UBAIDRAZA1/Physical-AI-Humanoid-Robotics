@@ -12,6 +12,7 @@ Professional JWT-based authentication system compatible with BetterAuth patterns
 ✅ **User Management**
 - Signup with email/password
 - Login with credentials
+- **Google OAuth 2.0 Login**
 - Profile management
 - Custom fields for personalization:
   - `software_background`: User's software experience
@@ -42,6 +43,10 @@ DATABASE_URL=postgresql://user:password@host/dbname
 
 # JWT Secret (generate a secure random string)
 JWT_SECRET_KEY=your-secret-key-here-min-32-chars
+
+# Google OAuth2 Credentials
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
 ```
 
 ### 3. Initialize Database
@@ -61,6 +66,12 @@ uvicorn main:app --reload --port 8000
 ## API Endpoints
 
 ### Authentication
+
+#### GET `/auth/login/google`
+Redirects to Google for authentication.
+
+#### GET `/auth/google`
+Callback endpoint for Google OAuth2. Handles user creation and login.
 
 #### POST `/auth/signup`
 Create a new user account.
@@ -138,6 +149,9 @@ Authorization: Bearer <token>
 
 ## Usage Examples
 
+### Google Login
+Navigate to `http://localhost:8000/auth/login/google` in your browser.
+
 ### Signup
 ```bash
 curl -X POST http://localhost:8000/auth/signup \
@@ -201,7 +215,7 @@ CREATE TABLE users (
     id VARCHAR PRIMARY KEY,
     email VARCHAR UNIQUE NOT NULL,
     name VARCHAR NOT NULL,
-    password_hash VARCHAR NOT NULL,
+    password_hash VARCHAR, -- Nullable for OAuth users
     software_background TEXT,
     hardware_background TEXT,
     email_verified BOOLEAN DEFAULT FALSE,

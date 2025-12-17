@@ -70,9 +70,9 @@ class RAGPipeline:
             raise RuntimeError("No available Gemini models found!")
         
         self.embedding_model_name = os.getenv('GEMINI_EMBEDDING_MODEL', 'text-embedding-004')
-        # Remove 'models/' prefix if present
-        if self.embedding_model_name.startswith('models/'):
-            self.embedding_model_name = self.embedding_model_name.replace('models/', '')
+        # Add 'models/' prefix if not present
+        if not self.embedding_model_name.startswith('models/'):
+            self.embedding_model_name = 'models/' + self.embedding_model_name
 
         self.chat_model = genai.GenerativeModel(
             self.chat_model_name,
