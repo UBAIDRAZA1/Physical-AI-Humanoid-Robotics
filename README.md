@@ -25,3 +25,14 @@ This project is an interactive **AI-powered Book Assistant** for the topic *Phys
 2. Type your question in the chat box.  
 3. Optionally, select any text from the book and enable “Answer only from selected text.”  
 4. Press **Ask** and get a detailed AI-generated answer.
+
+Locally:
+Frontend Run in physical-ai-book(powershell)
+npm run start
+
+Backend Run in backend folder (cmd prompt)
+.\venv\Scripts\Activate
+
+uvicorn main:app --reload
+
+
