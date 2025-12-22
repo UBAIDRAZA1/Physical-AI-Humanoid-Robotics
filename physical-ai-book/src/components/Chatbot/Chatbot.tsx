@@ -22,7 +22,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
   const { siteConfig } = useDocusaurusContext();
 
   // Python backend URL use karo
-  const backendBaseUrl = apiBaseUrl || (siteConfig.customFields?.apiBaseUrl as string) || 'http://localhost:8000';
+  const backendBaseUrl = apiBaseUrl || 'https://hafizubaid-hackathon-my-backend-api.hf.space';
   const baseUrl = `${backendBaseUrl}/chat`;
 
   const [question, setQuestion] = useState('');
