@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import styles from './Chatbot.module.css';
 
@@ -6,6 +6,7 @@ type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  ts?: number;
 };
 
 type ChatbotProps = {
@@ -31,6 +32,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedText, setSelectedText] = useState('');
   const [useSelectionOnly, setUseSelectionOnly] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
 
   const refreshSelection = useCallback(() => {
     setSelectedText(getSelectionText());
@@ -42,6 +45,42 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
   }, [refreshSelection]);
+
+  useEffect(() => {
+    if (!containerRef.current || typeof window === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) setIsVisible(true);
+        });
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const renderMessageContent = (content: string) => {
+    const fence = '```';
+    if (content.includes(fence)) {
+      const parts = content.split(fence);
+      const pre = parts[1]?.trim() || '';
+      const before = parts[0]?.trim();
+      const after = parts[2]?.trim();
+      return (
+        <>
+          {before && <div className={styles.messageParagraph}>{before}</div>}
+          {pre && (
+            <pre className={styles.codeBlock}>
+              <code>{pre}</code>
+            </pre>
+          )}
+          {after && <div className={styles.messageParagraph}>{after}</div>}
+        </>
+      );
+    }
+    return <div className={styles.messageContent}>{content}</div>;
+  };
 
   const sendQuestion = async () => {
     const trimmed = question.trim();
@@ -78,6 +117,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
       id: `${Date.now()}-user`,
       role: 'user',
       content: trimmed,
+      ts: Date.now(),
     };
     setMessages(prev => [...prev, userMsg]);
     setQuestion('');
@@ -140,6 +180,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
         id: `${Date.now()}-assistant`,
         role: 'assistant',
         content: data.answer,
+        ts: Date.now(),
       };
       setMessages(prev => [...prev, assistantMsg]);
 
@@ -163,6 +204,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
         id: `${Date.now()}-error`,
         role: 'assistant',
         content: errorMessage,
+        ts: Date.now(),
       };
       setMessages(prev => [...prev, assistantMsg]);
     } finally {
@@ -180,7 +222,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
   const hasSelection = selectedText.trim().length > 0;
 
   return (
-    <div className={styles.chatbotContainer}>
+    <div id="chat" ref={containerRef} className={`${styles.chatbotContainer} ${isVisible ? styles.visible : ''}`}>
       <div className={styles.header}>
         <h2 className={styles.title}>Book Assistant</h2>
         <p className={styles.subtitle}>
@@ -212,14 +254,20 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
           </div>
         )}
         {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={msg.role === 'user' ? styles.messageUser : styles.messageAssistant}
-          >
-            <div className={styles.messageRole}>
-              {msg.role === 'user' ? 'You' : 'Assistant'}
+          <div key={msg.id} className={msg.role === 'user' ? styles.messageUser : styles.messageAssistant}>
+            <div className={styles.messageHeader}>
+              <div className={styles.avatar}>{msg.role === 'user' ? 'Y' : 'A'}</div>
+              <div className={styles.meta}>
+                <span className={styles.messageRole}>{msg.role === 'user' ? 'You' : 'Assistant'}</span>
+                <span className={styles.dot}>•</span>
+                <span className={styles.timestamp}>
+                  {msg.ts ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                </span>
+              </div>
             </div>
-            <div className={styles.messageContent}>{msg.content}</div>
+            <div className={styles.bubble}>
+              {renderMessageContent(msg.content)}
+            </div>
           </div>
         ))}
         {isLoading && <div className={styles.typingIndicator}>Assistant is thinking…</div>}
@@ -241,6 +289,17 @@ const Chatbot: React.FC<ChatbotProps> = ({ apiBaseUrl }) => {
           disabled={isLoading || question.trim().length === 0}
         >
           {isLoading ? 'Sending…' : 'Ask'}
+        </button>
+      </div>
+      <div className={styles.suggestions}>
+        <button type="button" className={styles.suggestChip} onClick={() => setQuestion('Explain inverse kinematics with example')}>
+          Explain inverse kinematics with example
+        </button>
+        <button type="button" className={styles.suggestChip} onClick={() => setQuestion('Summarize the selected paragraph')}>
+          Summarize the selected paragraph
+        </button>
+        <button type="button" className={styles.suggestChip} onClick={() => setQuestion('How does ROS 2 handle topics?')}>
+          How does ROS 2 handle topics?
         </button>
       </div>
     </div>

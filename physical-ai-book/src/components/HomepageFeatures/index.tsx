@@ -2,6 +2,7 @@ import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Heading from '@theme/Heading';
 import styles from './styles.module.css';
+import React, { useEffect, useState } from 'react';
 
 type FeatureItem = {
   title: string;
@@ -44,7 +45,7 @@ const FeatureList: FeatureItem[] = [
 
 function Feature({title, Svg, description}: FeatureItem) {
   return (
-    <div className={clsx('col col--4')}>
+    <div className={styles.card}>
       <div className="text--center">
         <Svg className={styles.featureSvg} role="img" />
       </div>
@@ -57,12 +58,31 @@ function Feature({title, Svg, description}: FeatureItem) {
 }
 
 export default function HomepageFeatures(): ReactNode {
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setActive((a) => (a + 1) % FeatureList.length);
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <section className={styles.features}>
       <div className="container">
-        <div className="row">
+        <div className={styles.helperText}>Click to swap cards • Auto-cycles every 5s</div>
+        <div className={styles.grid}>
           {FeatureList.map((props, idx) => (
-            <Feature key={idx} {...props} />
+            <div
+              className={clsx(styles.gridItem, idx === active && styles.cardActive)}
+              key={idx}
+              onClick={() => setActive(idx)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && setActive(idx)}
+            >
+              <Feature {...props} />
+            </div>
           ))}
         </div>
       </div>
